@@ -9,9 +9,10 @@ var multi = (function() {
   var disabled_limit = false; // This will prevent to reset the "disabled" because of the limit at every click
 
   // Helper function to trigger an event on an element
-  var trigger_event = function(type, el) {
+  var trigger_event = function(type, el, causedBy) {
     var e = document.createEvent("HTMLEvents");
     e.initEvent(type, false, true);
+    e.causedBy = causedBy;
     el.dispatchEvent(e);
   };
 
@@ -71,8 +72,21 @@ var multi = (function() {
 
     check_limit(select, settings);
 
-    trigger_event("change", select);
+    trigger_event("change", select, option);
   };
+  
+  // Handle change event by performing any actions needed before refresh_select is called
+  var change_handler = function(ev, select, settings) {
+    // Do we need to ensure all duplicate options have the same state?
+    if (settings["deduplicate_selected_options"]) {
+      // Find all duplicate options with same value as the option that triggered the change. 
+      // Note, this will also include the triggering option too.
+      var matches = select.querySelectorAll(`option[value="${ev.causedBy.value}"]`);
+      // Ensure all matches' selected property is the same as triggering option's selected property.      
+      matches.forEach(function(el) { el.selected = ev.causedBy.selected });
+    }
+    refresh_select(select, settings);
+  }
 
   // Refreshes an already constructed multi.js instance
   var refresh_select = function(select, settings) {
@@ -103,6 +117,11 @@ var multi = (function() {
     // Current group
     var item_group = null;
     var current_optgroup = null;
+	
+    // Do we need to hide duplicate selected options?
+    if (settings["deduplicate_selected_options"]) {
+      var track_selected_options = {}
+    }
 
     // Loop over select options and add to the non-selected and selected columns
     for (var i = 0; i < select.options.length; i++) {
@@ -127,7 +146,17 @@ var multi = (function() {
       if (option.selected) {
         row.className += " selected";
         var clone = row.cloneNode(true);
-        select.wrapper.selected.appendChild(clone);
+		
+        // Do we need to avoid adding duplicate selected options to selected column?
+        if (settings["deduplicate_selected_options"]) {
+          if (!track_selected_options[value]) {
+            select.wrapper.selected.appendChild(clone);
+            track_selected_options[value] = true;
+          }          
+        }
+        else {		
+          select.wrapper.selected.appendChild(clone);
+        }
       }
 
       // Create group if entering a new optgroup
@@ -219,6 +248,10 @@ var multi = (function() {
       typeof settings["hide_empty_groups"] !== "undefined"
         ? settings["hide_empty_groups"]
         : false;
+	settings["deduplicate_selected_options"] =
+      typeof settings["deduplicate_selected_options"] !== "undefined"
+        ? settings["deduplicate_selected_options"]
+        : false;
 
     // Check if already initalized
     if (select.dataset.multijs != null) {
@@ -303,9 +336,9 @@ var multi = (function() {
     // Initialize selector with values from select element
     refresh_select(select, settings);
 
-    // Refresh selector when select values change
-    select.addEventListener("change", function() {
-      refresh_select(select, settings);
+    // Call handler when select values change
+    select.addEventListener("change", function(ev) {
+      change_handler(ev, select, settings);      
     });
   };
 
